@@ -119,7 +119,112 @@ CLASS _gui IMPLEMENTATION.
 
 ENDCLASS.                    "_gui IMPLEMENTATION
 
-CLASS _structure DEFINITION ABSTRACT FINAL.
+simple_exception ex_structure.
+simple_exception_sub type_not_found ex_structure.
+simple_exception_sub not_a_structure ex_structure.
+
+CLASS _structure DEFINITION.
+
+  PUBLIC SECTION.
+
+    DATA mr_structure_description TYPE REF TO cl_abap_structdescr READ-ONLY.
+
+    CLASS-METHODS: create_with_type_name
+      IMPORTING type_name TYPE string
+      RETURNING value(r_instance) TYPE REF TO _structure
+      RAISING ex_structure.
+
+    METHODS constructor
+      IMPORTING description_object TYPE REF TO cl_abap_structdescr.
+    METHODS append_field
+      IMPORTING iv_name TYPE string iv_type TYPE string
+      RAISING ex_structure.
+    METHODS create_data EXPORTING er_data TYPE REF TO data.
+
+ENDCLASS.
+
+CLASS _structure IMPLEMENTATION.
+
+  METHOD create_with_type_name.
+
+    DATA lr_type TYPE REF TO cl_abap_typedescr.
+
+    cl_abap_typedescr=>describe_by_name(
+      EXPORTING
+        p_name         = type_name
+      RECEIVING
+         p_descr_ref    = lr_type
+       EXCEPTIONS
+         type_not_found = 1
+         OTHERS         = 2
+    ).
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE type_not_found.
+    ENDIF.
+
+    DATA structure_description TYPE REF TO cl_abap_structdescr.
+
+    IF lr_type->kind NE lr_type->kind_struct.
+      RAISE EXCEPTION TYPE not_a_structure.
+    ENDIF.
+
+    structure_description ?= lr_type.
+
+    CREATE OBJECT r_instance
+      EXPORTING
+        description_object = structure_description.
+
+  ENDMETHOD.
+
+  METHOD constructor.
+
+    mr_structure_description = description_object.
+
+  ENDMETHOD.
+
+  METHOD create_data.
+    CREATE DATA er_data TYPE HANDLE mr_structure_description.
+  ENDMETHOD.
+
+  METHOD append_field.
+
+    DATA lt_components TYPE cl_abap_structdescr=>component_table.
+
+    lt_components = mr_structure_description->get_components( ).
+
+    FIELD-SYMBOLS <new_component> LIKE LINE OF lt_components.
+
+    APPEND INITIAL LINE TO lt_components ASSIGNING <new_component>.
+
+    <new_component>-name = iv_name.
+
+    DATA lr_descr_ref TYPE REF TO cl_abap_typedescr.
+
+    cl_abap_typedescr=>describe_by_name(
+      EXPORTING
+        p_name         = iv_type
+      RECEIVING
+        p_descr_ref    = lr_descr_ref
+      EXCEPTIONS
+        type_not_found = 1
+        OTHERS         = 2
+    ).
+
+    CASE sy-subrc.
+      WHEN 1.
+        RAISE EXCEPTION TYPE type_not_found.
+      WHEN OTHERS.
+    ENDCASE.
+
+    <new_component>-type ?= lr_descr_ref.
+
+    mr_structure_description = cl_abap_structdescr=>create( lt_components ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS _structure_utilities DEFINITION ABSTRACT FINAL.
 
   PUBLIC SECTION.
 
@@ -130,7 +235,7 @@ CLASS _structure DEFINITION ABSTRACT FINAL.
 
 ENDCLASS.
 
-CLASS _structure IMPLEMENTATION.
+CLASS _structure_utilities IMPLEMENTATION.
 
   METHOD repeating_to_table.
 
@@ -142,7 +247,9 @@ CLASS _structure IMPLEMENTATION.
 
     SPLIT field_prefix_sequence AT ',' INTO TABLE field_prefixes.
 
-    LOOP AT field_prefixes ASSIGNING FIELD-SYMBOL(<prefix>).
+    FIELD-SYMBOLS <prefix> TYPE string.
+
+    LOOP AT field_prefixes ASSIGNING <prefix>.
 
       <prefix> = |STRUCTURE-{ <prefix> }|.
 
@@ -154,23 +261,30 @@ CLASS _structure IMPLEMENTATION.
 
     DATA line TYPE REF TO data.
 
+    FIELD-SYMBOLS <line> TYPE any.
+
     DO.
 
-      APPEND INITIAL LINE TO target_table ASSIGNING FIELD-SYMBOL(<line>).
+      APPEND INITIAL LINE TO target_table ASSIGNING <line>.
 
-      DATA(inserted_line) = sy-tabix.
+      DATA inserted_line TYPE sytabix.
+      inserted_line = sy-tabix.
+
+      DATA field_accessor TYPE string.
+
+      FIELD-SYMBOLS: <field> TYPE any, <component> TYPE any.
 
       LOOP AT field_prefixes ASSIGNING <prefix>.
 
-        DATA(field_accessor) = <prefix> && repeat_number.
+        field_accessor = <prefix> && repeat_number.
 
-        ASSIGN (field_accessor) TO FIELD-SYMBOL(<field>).
+        ASSIGN (field_accessor) TO <field>.
 
         IF <field> IS NOT ASSIGNED OR <field> IS INITIAL.
           CONTINUE.
         ENDIF.
 
-        ASSIGN COMPONENT sy-tabix OF STRUCTURE <line> TO FIELD-SYMBOL(<component>).
+        ASSIGN COMPONENT sy-tabix OF STRUCTURE <line> TO <component>.
 
         <component> = <field>.
 
